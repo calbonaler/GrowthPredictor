@@ -1,12 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GrowthPredictor
 {
@@ -14,15 +10,14 @@ namespace GrowthPredictor
 	{
 		static void Main(string[] args)
 		{
-			Gnuplot gnuplot = new Gnuplot(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gnuplot", "bin", "gnuplot.exe"));
+			var gnuplot = new Gnuplot(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gnuplot", "bin", "gnuplot.exe"));
 			gnuplot.Send("unset key");
-			long populationSum = GrowthData.Sum(x => x.Value.Population);
 			Console.WriteLine("Welcome to Growth Predictor");
 			Console.WriteLine();
 			while (true)
 			{
 				Console.Write("> ");
-				string line = Console.ReadLine();
+				var line = Console.ReadLine();
 				if (line == null)
 					break;
 				line = line.Trim();
@@ -54,7 +49,7 @@ namespace GrowthPredictor
 							Console.WriteLine();
 							goto Next;
 						}
-						PlotAgeGroupProbabilities(gnuplot, populationSum, data => data.Height, value, value + range);
+						PlotAgeGroupProbabilities(gnuplot, data => data.Height, value, value + range);
 					}
 					else if (component.EndsWith("kg"))
 					{
@@ -64,7 +59,7 @@ namespace GrowthPredictor
 							Console.WriteLine();
 							goto Next;
 						}
-						PlotAgeGroupProbabilities(gnuplot, populationSum, data => data.Weight, value, value + range);
+						PlotAgeGroupProbabilities(gnuplot, data => data.Weight, value, value + range);
 					}
 					else
 					{
@@ -91,7 +86,7 @@ namespace GrowthPredictor
 			if (!string.IsNullOrEmpty(afterColon))
 				return decimal.TryParse(afterColon, out range);
 			range = 1;
-			int decimalPointIndex = beforeColon.IndexOf('.');
+			var decimalPointIndex = beforeColon.IndexOf('.');
 			if (decimalPointIndex >= 0)
 			{
 				while (++decimalPointIndex < beforeColon.Length)
@@ -100,54 +95,45 @@ namespace GrowthPredictor
 			return true;
 		}
 
-		static void PlotAgeGroupProbabilities(Gnuplot gnuplot, long allPopulation, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, decimal min, decimal max)
+		static void PlotAgeGroupProbabilities(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, decimal min, decimal max)
 		{
 			gnuplot.SetXRange(5, 17);
 			gnuplot.SetYRange(0, double.NaN);
-			var likelihoods = GrowthData.OrderBy(x => x.Key).Select(x => new KeyValuePair<int, double>(x.Key, distributionSelector(x.Value).GetProbability(min, max) * x.Value.Population / allPopulation)).ToArray();
-			double sum = likelihoods.Sum(x => x.Value);
-			if (sum == 0)
-				sum = 1;
-			gnuplot.Plot(likelihoods.Select(x => $"{x.Key} {x.Value / sum}"), "w lp");
+			var likelihoods = GrowthData.OrderBy(x => x.Key).Select(x => new KeyValuePair<int, double>(x.Key, distributionSelector(x.Value).GetProbability(min, max))).ToArray();
+			gnuplot.Plot(likelihoods.Select(x => $"{x.Key} {x.Value}"), "w lp");
 		}
 
 		static readonly IReadOnlyDictionary<int, AgeGroupGrowthData> GrowthData = MakeGrowthData();
 
-		static Dictionary<int, AgeGroupGrowthData> MakeGrowthData()
+		static Dictionary<int, AgeGroupGrowthData> MakeGrowthData() => new Dictionary<int, AgeGroupGrowthData>()
 		{
-			return new Dictionary<int, AgeGroupGrowthData>()
-			{
-				{  5, new AgeGroupGrowthData((109.4m, 4.66m), (18.5m, 2.48m), 510000) },
-				{  6, new AgeGroupGrowthData((115.5m, 4.83m), (20.8m, 3.15m), 524000) },
-				{  7, new AgeGroupGrowthData((121.5m, 5.13m), (23.4m, 3.72m), 522000) },
-				{  8, new AgeGroupGrowthData((127.3m, 5.50m), (26.4m, 4.71m), 518000) },
-				{  9, new AgeGroupGrowthData((133.4m, 6.14m), (29.7m, 5.72m), 517000) },
-				{ 10, new AgeGroupGrowthData((140.1m, 6.77m), (33.9m, 6.85m), 537000) },
-				{ 11, new AgeGroupGrowthData((146.7m, 6.63m), (38.8m, 7.66m), 545000) },
-				{ 12, new AgeGroupGrowthData((151.8m, 5.90m), (43.6m, 7.95m), 561000) },
-				{ 13, new AgeGroupGrowthData((154.9m, 5.44m), (47.3m, 7.70m), 569000) },
-				{ 14, new AgeGroupGrowthData((156.5m, 5.30m), (49.9m, 7.41m), 573000) },
-				{ 15, new AgeGroupGrowthData((157.1m, 5.29m), (51.5m, 7.76m), 576000) },
-				{ 16, new AgeGroupGrowthData((157.6m, 5.32m), (52.6m, 7.72m), 585000) },
-				{ 17, new AgeGroupGrowthData((157.9m, 5.38m), (53.0m, 7.83m), 583000) },
-			};
-		}
+			{  5, new AgeGroupGrowthData((109.4m, 4.66m), (18.5m, 2.48m)) },
+			{  6, new AgeGroupGrowthData((115.5m, 4.83m), (20.8m, 3.15m)) },
+			{  7, new AgeGroupGrowthData((121.5m, 5.13m), (23.4m, 3.72m)) },
+			{  8, new AgeGroupGrowthData((127.3m, 5.50m), (26.4m, 4.71m)) },
+			{  9, new AgeGroupGrowthData((133.4m, 6.14m), (29.7m, 5.72m)) },
+			{ 10, new AgeGroupGrowthData((140.1m, 6.77m), (33.9m, 6.85m)) },
+			{ 11, new AgeGroupGrowthData((146.7m, 6.63m), (38.8m, 7.66m)) },
+			{ 12, new AgeGroupGrowthData((151.8m, 5.90m), (43.6m, 7.95m)) },
+			{ 13, new AgeGroupGrowthData((154.9m, 5.44m), (47.3m, 7.70m)) },
+			{ 14, new AgeGroupGrowthData((156.5m, 5.30m), (49.9m, 7.41m)) },
+			{ 15, new AgeGroupGrowthData((157.1m, 5.29m), (51.5m, 7.76m)) },
+			{ 16, new AgeGroupGrowthData((157.6m, 5.32m), (52.6m, 7.72m)) },
+			{ 17, new AgeGroupGrowthData((157.9m, 5.38m), (53.0m, 7.83m)) },
+		};
 	}
 
 	public class AgeGroupGrowthData
 	{
-		public AgeGroupGrowthData((decimal mean, decimal standardDeviation) height, (decimal mean, decimal standardDeviation) weight, long population)
+		public AgeGroupGrowthData((decimal mean, decimal standardDeviation) height, (decimal mean, decimal standardDeviation) weight)
 		{
 			Height = new GrowthDistribution(height.mean, height.standardDeviation);
 			Weight = new GrowthDistribution(weight.mean, weight.standardDeviation);
-			Population = population;
 		}
 
 		public GrowthDistribution Height { get; }
 
 		public GrowthDistribution Weight { get; }
-
-		public long Population { get; }
 	}
 
 	public class GrowthDistribution
@@ -207,14 +193,9 @@ namespace GrowthPredictor
 
 		Process m_Process;
 
-		static string GetRangeExpression(double min, double max)
-		{
-			return string.Format("[{0}:{1}]",
-				double.IsNaN(min) ? "*" : min.ToString(),
-				double.IsNaN(max) ? "*" : max.ToString());
-		}
+		static string GetRangeExpression(double min, double max) => string.Format("[{0}:{1}]", double.IsNaN(min) ? "*" : min.ToString(), double.IsNaN(max) ? "*" : max.ToString());
 
-		public void Plot(string arguments) { Send($"plot {arguments}"); }
+		public void Plot(string arguments) => Send($"plot {arguments}");
 
 		public void Plot<T>(IEnumerable<T> source, string arguments = "") => Plot(source.Select(x => x.ToString()), arguments);
 
@@ -226,10 +207,10 @@ namespace GrowthPredictor
 			Send("e");
 		}
 
-		public void SetXRange(double min, double max) { Send($"set xrange {GetRangeExpression(min, max)}"); }
+		public void SetXRange(double min, double max) => Send($"set xrange {GetRangeExpression(min, max)}");
 
-		public void SetYRange(double min, double max) { Send($"set yrange {GetRangeExpression(min, max)}"); }
+		public void SetYRange(double min, double max) => Send($"set yrange {GetRangeExpression(min, max)}");
 
-		public void Send(string message) { m_Process.StandardInput.WriteLine(message); }
+		public void Send(string message) => m_Process.StandardInput.WriteLine(message);
 	}
 }
