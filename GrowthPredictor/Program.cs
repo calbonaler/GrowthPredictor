@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 
@@ -8,8 +9,9 @@ namespace GrowthPredictor
 {
 	class Program
 	{
-		static void Main(string[] args)
+		static void Main()
 		{
+			var argumentNames = new[] { "Age", "Height", "Weight" };
 			var gnuplot = new Gnuplot(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gnuplot", "bin", "gnuplot.exe"));
 			gnuplot.Send("unset key");
 			Console.WriteLine("Welcome to Growth Predictor");
@@ -21,78 +23,129 @@ namespace GrowthPredictor
 				if (line == null)
 					break;
 				line = line.Trim();
-				foreach (var component in line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
+				if (string.IsNullOrEmpty(line))
+					continue;
+				if (!ParseCommand(line, out var target, out var age, out var height, out var weight))
 				{
-					if (component.EndsWith("yo"))
-					{
-						if (!int.TryParse(component.Substring(0, component.Length - 2), out var yearOld))
-						{
-							Console.WriteLine("Cannot convert input data to age.");
-							Console.WriteLine();
-							goto Next;
-						}
-						if (!GrowthData.TryGetValue(yearOld, out var data))
-						{
-							Console.WriteLine("Cannot find growth data corresponding to requested age.");
-							Console.WriteLine();
-							goto Next;
-						}
-						gnuplot.SetXRange((double)(data.Height.Mean - 30), (double)(data.Height.Mean + 30));
-						gnuplot.SetYRange(0, double.NaN);
-						gnuplot.Plot($"1 / sqrt(2 * pi * {data.Height.StandardDeviation} ** 2) * exp(-(x - {data.Height.Mean}) ** 2 / (2 * {data.Height.StandardDeviation} ** 2))");
-					}
-					else if (component.EndsWith("cm"))
-					{
-						if (!TryParseValueAndRange(component.Substring(0, component.Length - 2), out var value, out var range))
-						{
-							Console.WriteLine("Cannot convert input data to height.");
-							Console.WriteLine();
-							goto Next;
-						}
-						PlotAgeGroupProbabilities(gnuplot, data => data.Height, value, value + range);
-					}
-					else if (component.EndsWith("kg"))
-					{
-						if (!TryParseValueAndRange(component.Substring(0, component.Length - 2), out var value, out var range))
-						{
-							Console.WriteLine("Cannot convert input data to weight.");
-							Console.WriteLine();
-							goto Next;
-						}
-						PlotAgeGroupProbabilities(gnuplot, data => data.Weight, value, value + range);
-					}
-					else
-					{
-						Console.WriteLine("Cannot parse input command");
-						Console.WriteLine();
-						goto Next;
-					}
+					continue;
 				}
-			Next:;
+				var subActionIndex = -1;
+				Span<bool> actualArgumentUsages = stackalloc bool[] { age.HasValue, height.HasValue, weight.HasValue };
+				for (var i = 0; i < SubActions.Count; ++i)
+				{
+					if (SubActions[i].Target != target)
+						continue;
+					subActionIndex = i;
+					if (CheckArguments(actualArgumentUsages, i) == null)
+						break;
+				}
+				if (subActionIndex < 0)
+				{
+					Console.WriteLine("Unknown target value.");
+					continue;
+				}
+				var errorArgumentResult = CheckArguments(actualArgumentUsages, subActionIndex);
+				if (errorArgumentResult != null)
+				{
+					if (errorArgumentResult.Value.Required)
+						Console.WriteLine($"{argumentNames[errorArgumentResult.Value.Index]} is required.");
+					else
+						Console.WriteLine($"{argumentNames[errorArgumentResult.Value.Index]} is unnecessary.");
+				}
+				else
+				{
+					SubActions[subActionIndex].Action(gnuplot, age ?? default, height ?? default, weight ?? default);
+				}
 			}
 		}
 
-		static bool TryParseValueAndRange(string text, out decimal value, out decimal range)
+		static readonly IList<SubAction> SubActions = new SubAction[]
 		{
-			text = text.Trim();
-			var colonIndex = text.IndexOf(':');
-			var beforeColon = colonIndex < 0 ? text : text.Substring(0, colonIndex).Trim();
-			var afterColon = colonIndex < 0 ? "" : text.Substring(colonIndex + 1).Trim();
-			if (!decimal.TryParse(beforeColon, out value))
+			new SubAction("height", true , false, false, (g, age, _, __) => PredictHeightFromAge(g, age)),
+			new SubAction("age"   , false, true , false, (g, _, height, __) => PlotAgeGroupProbabilities(g, x => x.Height, height.Minimum, height.Maximum)),
+			new SubAction("age"   , false, false, true , (g, _, __, weight) => PlotAgeGroupProbabilities(g, x => x.Weight, weight.Minimum, weight.Maximum)),
+			new SubAction("lhs"   , true,  true,  false, (_, age, height, __) => ComputeLhs(age, height))
+		};
+
+		static bool ParseCommand(string command, [NotNullWhen(true)] out string? target, out int? age, out ContinuousRange? height, out ContinuousRange? weight)
+		{
+			var components = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+			target = default;
+			age = default;
+			height = default;
+			weight = default;
+			if (components.Length < 1)
 			{
-				range = 0;
+				Console.WriteLine("Cannot parse input command.");
 				return false;
 			}
-			if (!string.IsNullOrEmpty(afterColon))
-				return decimal.TryParse(afterColon, out range);
-			range = 1;
-			var decimalPointIndex = beforeColon.IndexOf('.');
-			if (decimalPointIndex >= 0)
+			target = components[0];
+			for (var i = 1; i < components.Length; ++i)
 			{
-				while (++decimalPointIndex < beforeColon.Length)
-					range /= 10;
+				if (components[i].EndsWith("yo"))
+				{
+					if (!int.TryParse(components[i][..^2].Trim(), out var result))
+					{
+						Console.WriteLine("Cannot convert input data to age.");
+						return false;
+					}
+					age = result;
+				}
+				else if (components[i].EndsWith("cm"))
+				{
+					if (!ContinuousRange.TryParse(components[i][..^2].Trim(), out var result))
+					{
+						Console.WriteLine("Cannot convert input data to height.");
+						return false;
+					}
+					height = result;
+				}
+				else if (components[i].EndsWith("kg"))
+				{
+					if (!ContinuousRange.TryParse(components[i][..^2].Trim(), out var result))
+					{
+						Console.WriteLine("Cannot convert input data to weight.");
+						return false;
+					}
+					weight = result;
+				}
 			}
 			return true;
+		}
+
+		static (int Index, bool Required)? CheckArguments(Span<bool> actualArgumentUsages, int subActionIndex)
+		{
+			Span<bool> itemUsages = stackalloc bool[] { SubActions[subActionIndex].UseAge, SubActions[subActionIndex].UseHeight, SubActions[subActionIndex].UseWeight };
+			for (var j = 0; j < actualArgumentUsages.Length; ++j)
+			{
+				if (itemUsages[j] && !actualArgumentUsages[j])
+					return (j, true);
+				if (!itemUsages[j] && actualArgumentUsages[j])
+					return (j, false);
+			}
+			return null;
+		}
+
+		static void PredictHeightFromAge(Gnuplot gnuplot, int age)
+		{
+			if (!GrowthData.TryGetValue(age, out var data))
+			{
+				Console.WriteLine("Cannot find growth data corresponding to requested age.");
+				return;
+			}
+			gnuplot.SetXRange((double)(data.Height.Mean - 30), (double)(data.Height.Mean + 30));
+			gnuplot.SetYRange(0, double.NaN);
+			gnuplot.Plot($"1 / sqrt(2 * pi * {data.Height.StandardDeviation} ** 2) * exp(-(x - {data.Height.Mean}) ** 2 / (2 * {data.Height.StandardDeviation} ** 2))");
+		}
+
+		static void ComputeLhs(int age, ContinuousRange height)
+		{
+			if (!GrowthData.TryGetValue(age, out var data))
+			{
+				Console.WriteLine("Cannot find growth data corresponding to requested age.");
+				return;
+			}
+			Console.WriteLine($"{data.Height.GetCdf(height.Minimum):E20}");
 		}
 
 		static void PlotAgeGroupProbabilities(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, decimal min, decimal max)
@@ -121,6 +174,81 @@ namespace GrowthPredictor
 			{ 16, new AgeGroupGrowthData((157.6m, 5.32m), (52.6m, 7.72m)) },
 			{ 17, new AgeGroupGrowthData((157.9m, 5.38m), (53.0m, 7.83m)) },
 		};
+	}
+
+	public readonly struct SubAction : IEquatable<SubAction>
+	{
+		public SubAction(string target, bool useAge, bool useHeight, bool useWeight, Action<Gnuplot, int, ContinuousRange, ContinuousRange> action)
+		{
+			Target = target;
+			UseAge = useAge;
+			UseHeight = useHeight;
+			UseWeight = useWeight;
+			Action = action;
+		}
+
+		public string Target { get; }
+		public bool UseAge { get; }
+		public bool UseHeight { get; }
+		public bool UseWeight { get; }
+		public Action<Gnuplot, int, ContinuousRange, ContinuousRange> Action { get; }
+
+		public bool Equals([AllowNull] SubAction other) => Target == other.Target && UseAge == other.UseAge && UseHeight == other.UseHeight && UseWeight == other.UseWeight && Action == other.Action;
+		public override bool Equals(object? obj) => obj is SubAction other && Equals(other);
+		public override int GetHashCode() => Target.GetHashCode() ^ UseAge.GetHashCode() ^ UseHeight.GetHashCode() ^ UseWeight.GetHashCode() ^ Action.GetHashCode();
+		public static bool operator ==(SubAction left, SubAction right) => left.Equals(right);
+		public static bool operator !=(SubAction left, SubAction right) => !(left == right);
+	}
+
+	public readonly struct ContinuousRange : IEquatable<ContinuousRange>
+	{
+		public ContinuousRange(decimal minimum, decimal maximum)
+		{
+			Minimum = minimum;
+			Maximum = maximum;
+		}
+
+		public decimal Minimum { get; }
+		public decimal Maximum { get; }
+
+		public bool Equals([AllowNull] ContinuousRange other) => Minimum == other.Minimum && Maximum == other.Maximum;
+		public override bool Equals(object? obj) => obj is ContinuousRange other && Equals(other);
+		public override int GetHashCode() => Minimum.GetHashCode() ^ Maximum.GetHashCode();
+		public static bool operator ==(ContinuousRange left, ContinuousRange right) => left.Equals(right);
+		public static bool operator !=(ContinuousRange left, ContinuousRange right) => !(left == right);
+
+		public static bool TryParse(string text, out ContinuousRange result)
+		{
+			var colonIndex = text.IndexOf(':');
+			var beforeColon = colonIndex < 0 ? text : text[0..colonIndex].Trim();
+			var afterColon = colonIndex < 0 ? "" : text[(colonIndex + 1)..].Trim();
+			if (!decimal.TryParse(beforeColon, out var value))
+			{
+				result = default;
+				return false;
+			}
+			decimal range;
+			if (!string.IsNullOrEmpty(afterColon))
+			{
+				if (!decimal.TryParse(afterColon, out range))
+				{
+					result = default;
+					return false;
+				}
+			}
+			else
+			{
+				range = 1;
+				var decimalPointIndex = beforeColon.IndexOf('.');
+				if (decimalPointIndex >= 0)
+				{
+					while (++decimalPointIndex < beforeColon.Length)
+						range /= 10;
+				}
+			}
+			result = new ContinuousRange(value, value + range);
+			return true;
+		}
 	}
 
 	public class AgeGroupGrowthData
@@ -156,6 +284,8 @@ namespace GrowthPredictor
 			var minV = MathNet.Numerics.SpecialFunctions.Erf((double)(min - Mean) / (double)StandardDeviation / Sqrt2);
 			return (maxV - minV) / 2;
 		}
+
+		public double GetCdf(decimal value) => (1 + MathNet.Numerics.SpecialFunctions.Erf((double)(value - Mean) / (double)StandardDeviation / Sqrt2)) / 2;
 	}
 
 	public class Gnuplot : IDisposable
@@ -171,6 +301,8 @@ namespace GrowthPredictor
 
 		public void Kill()
 		{
+			if (m_Process == null)
+				throw new ObjectDisposedException(nameof(Gnuplot));
 			if (!m_Process.HasExited)
 				m_Process.Kill();
 		}
@@ -191,13 +323,11 @@ namespace GrowthPredictor
 			}
 		}
 
-		Process m_Process;
+		Process? m_Process;
 
 		static string GetRangeExpression(double min, double max) => string.Format("[{0}:{1}]", double.IsNaN(min) ? "*" : min.ToString(), double.IsNaN(max) ? "*" : max.ToString());
 
 		public void Plot(string arguments) => Send($"plot {arguments}");
-
-		public void Plot<T>(IEnumerable<T> source, string arguments = "") => Plot(source.Select(x => x.ToString()), arguments);
 
 		public void Plot(IEnumerable<string> source, string arguments = "")
 		{
@@ -211,6 +341,11 @@ namespace GrowthPredictor
 
 		public void SetYRange(double min, double max) => Send($"set yrange {GetRangeExpression(min, max)}");
 
-		public void Send(string message) => m_Process.StandardInput.WriteLine(message);
+		public void Send(string message)
+		{
+			if (m_Process == null)
+				throw new ObjectDisposedException(nameof(Gnuplot));
+			m_Process.StandardInput.WriteLine(message);
+		}
 	}
 }
