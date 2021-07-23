@@ -11,8 +11,7 @@ namespace GrowthPredictor
 	{
 		static void Main()
 		{
-			var argumentNames = new[] { "Age", "Height", "Weight" };
-			var gnuplot = new Gnuplot(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gnuplot", "bin", "gnuplot.exe"));
+			using var gnuplot = new Gnuplot(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gnuplot", "bin", "gnuplot.exe"));
 			gnuplot.Send("unset key");
 			Console.WriteLine("Welcome to Growth Predictor");
 			Console.WriteLine();
@@ -25,84 +24,90 @@ namespace GrowthPredictor
 				line = line.Trim();
 				if (string.IsNullOrEmpty(line))
 					continue;
-				if (!ParseCommand(line, out var target, out var age, out var height, out var weight))
-				{
+				if (!TryParseCommand(line, out var target, out var subActionArguments))
 					continue;
-				}
-				var subActionIndex = -1;
-				Span<bool> actualArgumentUsages = stackalloc bool[] { age.HasValue, height.HasValue, weight.HasValue };
-				for (var i = 0; i < SubActions.Count; ++i)
+				SubAction? validatedSubAction = null;
+				var validationResults = new List<Dictionary<SubActionArgumentName, SubActionArgumentError>>();
+				foreach (var subAction in SubActions.Where(x => x.Target == target))
 				{
-					if (SubActions[i].Target != target)
-						continue;
-					subActionIndex = i;
-					if (CheckArguments(actualArgumentUsages, i) == null)
+					validationResults.Add(subAction.ValidateArguments(subActionArguments));
+					if (validationResults[^1].Count == 0)
+					{
+						validatedSubAction = subAction;
 						break;
+					}
 				}
-				if (subActionIndex < 0)
+				if (validatedSubAction == null)
 				{
-					Console.WriteLine("Unknown target value.");
+					if (validationResults.Count > 0)
+					{
+						var bestFitValidationResult = validationResults.Aggregate((x, y) => x.Count < y.Count ? x : y);
+						foreach (var kvp in bestFitValidationResult.OrderBy(x => x.Key))
+						{
+							if (kvp.Value == SubActionArgumentError.RequiredParameterMissing)
+								Console.WriteLine($"{kvp.Key} is required.");
+							else if (kvp.Value == SubActionArgumentError.UnnecessaryArgumentFound)
+								Console.WriteLine($"{kvp.Key} is unnecessary.");
+							else
+								Console.WriteLine($"{kvp.Key} expects point but got range.");
+						}
+					}
+					else
+						Console.WriteLine("Unknown target value.");
 					continue;
 				}
-				var errorArgumentResult = CheckArguments(actualArgumentUsages, subActionIndex);
-				if (errorArgumentResult != null)
-				{
-					if (errorArgumentResult.Value.Required)
-						Console.WriteLine($"{argumentNames[errorArgumentResult.Value.Index]} is required.");
-					else
-						Console.WriteLine($"{argumentNames[errorArgumentResult.Value.Index]} is unnecessary.");
-				}
-				else
-				{
-					SubActions[subActionIndex].Action(gnuplot, age ?? default, height ?? default, weight ?? default);
-				}
+				validatedSubAction.Invoke(gnuplot, subActionArguments);
 			}
 		}
 
-		static readonly IList<SubAction> SubActions = new SubAction[]
+		static readonly IReadOnlyList<SubAction> SubActions = new[]
 		{
-			new SubAction("height", true , false, false, (g, age, _, __) => PredictHeightFromAge(g, age)),
-			new SubAction("age"   , false, true , false, (g, _, height, __) => PlotAgeGroupProbabilities(g, x => x.Height, height.Minimum, height.Maximum)),
-			new SubAction("age"   , false, false, true , (g, _, __, weight) => PlotAgeGroupProbabilities(g, x => x.Weight, weight.Minimum, weight.Maximum)),
-			new SubAction("lhs"   , true,  true,  false, (_, age, height, __) => ComputeLhs(age, height))
+			new SubAction("height", new Action<Gnuplot, int>((g, age) => PlotGrowthDistribution(g, x => x.Height, age))),
+			new SubAction("weight", new Action<Gnuplot, int>((g, age) => PlotGrowthDistribution(g, x => x.Weight, age))),
+			new SubAction("age"   , new Action<Gnuplot, ContinuousRange>((g, height) => PlotAgeGroupProbabilities(g, x => x.Height, height))),
+			new SubAction("age"   , new Action<Gnuplot, ContinuousRange>((g, weight) => PlotAgeGroupProbabilities(g, x => x.Weight, weight))),
+			new SubAction("lhs"   , new Action<int, decimal>((age, height) => ComputeLhs(age, x => x.Height, height))),
+			new SubAction("lhs"   , new Action<int, decimal>((age, weight) => ComputeLhs(age, x => x.Weight, weight))),
+			new SubAction("help"  , new Action(PrintHelp)),
 		};
 
-		static bool ParseCommand(string command, [NotNullWhen(true)] out string? target, out int? age, out ContinuousRange? height, out ContinuousRange? weight)
+		static bool TryParseCommand(string command, [NotNullWhen(true)] out string? target, out SubActionArguments subActionArguments)
 		{
 			var components = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 			target = default;
-			age = default;
-			height = default;
-			weight = default;
+			subActionArguments = default;
 			if (components.Length < 1)
 			{
 				Console.WriteLine("Cannot parse input command.");
 				return false;
 			}
 			target = components[0];
-			for (var i = 1; i < components.Length; ++i)
+			int? age = default;
+			ContinuousRangeOrPoint? height = default;
+			ContinuousRangeOrPoint? weight = default;
+			foreach (var component in components.Skip(1))
 			{
-				if (components[i].EndsWith("yo"))
+				if (component.EndsWith("yo"))
 				{
-					if (!int.TryParse(components[i][..^2].Trim(), out var result))
+					if (!int.TryParse(component[..^2].Trim(), out var result))
 					{
 						Console.WriteLine("Cannot convert input data to age.");
 						return false;
 					}
 					age = result;
 				}
-				else if (components[i].EndsWith("cm"))
+				else if (component.EndsWith("cm"))
 				{
-					if (!ContinuousRange.TryParse(components[i][..^2].Trim(), out var result))
+					if (!ContinuousRangeOrPoint.TryParse(component[..^2].Trim(), out var result))
 					{
 						Console.WriteLine("Cannot convert input data to height.");
 						return false;
 					}
 					height = result;
 				}
-				else if (components[i].EndsWith("kg"))
+				else if (component.EndsWith("kg"))
 				{
-					if (!ContinuousRange.TryParse(components[i][..^2].Trim(), out var result))
+					if (!ContinuousRangeOrPoint.TryParse(component[..^2].Trim(), out var result))
 					{
 						Console.WriteLine("Cannot convert input data to weight.");
 						return false;
@@ -110,55 +115,68 @@ namespace GrowthPredictor
 					weight = result;
 				}
 			}
+			subActionArguments = new SubActionArguments(age, height, weight);
 			return true;
 		}
 
-		static (int Index, bool Required)? CheckArguments(Span<bool> actualArgumentUsages, int subActionIndex)
+		static void PrintHelp()
 		{
-			Span<bool> itemUsages = stackalloc bool[] { SubActions[subActionIndex].UseAge, SubActions[subActionIndex].UseHeight, SubActions[subActionIndex].UseWeight };
-			for (var j = 0; j < actualArgumentUsages.Length; ++j)
+			Console.WriteLine("Commands:");
+			foreach (var subAction in SubActions)
 			{
-				if (itemUsages[j] && !actualArgumentUsages[j])
-					return (j, true);
-				if (!itemUsages[j] && actualArgumentUsages[j])
-					return (j, false);
+				Console.Write("  ");
+				Console.Write(subAction.Target);
+				if (subAction.UseAge)
+					Console.Write(" <age>yo");
+				if (subAction.UseHeight)
+				{
+					Console.Write(" <height>");
+					if (subAction.IsHeightRange)
+						Console.Write("[:<delta>]");
+					Console.Write("cm");
+				}
+				if (subAction.UseWeight)
+				{
+					Console.Write(" <weight>");
+					if (subAction.IsWeightRange)
+						Console.Write("[:<delta>]");
+					Console.Write("kg");
+				}
+				Console.WriteLine();
 			}
-			return null;
+			Console.WriteLine("Type ^Z followed by Enter to exit");
 		}
-
-		static void PredictHeightFromAge(Gnuplot gnuplot, int age)
+		static void PlotGrowthDistribution(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, int age)
 		{
 			if (!GrowthData.TryGetValue(age, out var data))
 			{
 				Console.WriteLine("Cannot find growth data corresponding to requested age.");
 				return;
 			}
-			gnuplot.SetXRange((double)(data.Height.Mean - 30), (double)(data.Height.Mean + 30));
+			var distribution = distributionSelector(data);
+			gnuplot.SetXRange((double)(distribution.Mean - distribution.StandardDeviation * 6), (double)(distribution.Mean + distribution.StandardDeviation * 6));
 			gnuplot.SetYRange(0, double.NaN);
-			gnuplot.Plot($"1 / sqrt(2 * pi * {data.Height.StandardDeviation} ** 2) * exp(-(x - {data.Height.Mean}) ** 2 / (2 * {data.Height.StandardDeviation} ** 2))");
+			gnuplot.Plot($"1 / sqrt(2 * pi * {distribution.StandardDeviation} ** 2) * exp(-(x - {distribution.Mean}) ** 2 / (2 * {distribution.StandardDeviation} ** 2))");
 		}
-
-		static void ComputeLhs(int age, ContinuousRange height)
+		static void ComputeLhs(int age, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, decimal value)
 		{
 			if (!GrowthData.TryGetValue(age, out var data))
 			{
 				Console.WriteLine("Cannot find growth data corresponding to requested age.");
 				return;
 			}
-			Console.WriteLine($"{data.Height.GetCdf(height.Minimum):E20}");
+			Console.WriteLine($"{distributionSelector(data).GetCdf(value):E20}");
 		}
-
-		static void PlotAgeGroupProbabilities(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, decimal min, decimal max)
+		static void PlotAgeGroupProbabilities(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, ContinuousRange range)
 		{
 			gnuplot.SetXRange(5, 17);
 			gnuplot.SetYRange(0, double.NaN);
-			var likelihoods = GrowthData.OrderBy(x => x.Key).Select(x => new KeyValuePair<int, double>(x.Key, distributionSelector(x.Value).GetProbability(min, max))).ToArray();
-			gnuplot.Plot(likelihoods.Select(x => $"{x.Key} {x.Value}"), "w lp");
+			gnuplot.Plot(GrowthData.Select(x => $"{x.Key} {distributionSelector(x.Value).GetProbability(range)}"), "w lp");
 		}
 
 		static readonly IReadOnlyDictionary<int, AgeGroupGrowthData> GrowthData = MakeGrowthData();
 
-		static Dictionary<int, AgeGroupGrowthData> MakeGrowthData() => new Dictionary<int, AgeGroupGrowthData>()
+		static SortedDictionary<int, AgeGroupGrowthData> MakeGrowthData() => new()
 		{
 			{  5, new AgeGroupGrowthData((109.4m, 4.66m), (18.5m, 2.48m)) },
 			{  6, new AgeGroupGrowthData((115.5m, 4.83m), (20.8m, 3.15m)) },
@@ -176,48 +194,56 @@ namespace GrowthPredictor
 		};
 	}
 
-	public readonly struct SubAction : IEquatable<SubAction>
+	public enum SubActionArgumentName
 	{
-		public SubAction(string target, bool useAge, bool useHeight, bool useWeight, Action<Gnuplot, int, ContinuousRange, ContinuousRange> action)
-		{
-			Target = target;
-			UseAge = useAge;
-			UseHeight = useHeight;
-			UseWeight = useWeight;
-			Action = action;
-		}
-
-		public string Target { get; }
-		public bool UseAge { get; }
-		public bool UseHeight { get; }
-		public bool UseWeight { get; }
-		public Action<Gnuplot, int, ContinuousRange, ContinuousRange> Action { get; }
-
-		public bool Equals([AllowNull] SubAction other) => Target == other.Target && UseAge == other.UseAge && UseHeight == other.UseHeight && UseWeight == other.UseWeight && Action == other.Action;
-		public override bool Equals(object? obj) => obj is SubAction other && Equals(other);
-		public override int GetHashCode() => Target.GetHashCode() ^ UseAge.GetHashCode() ^ UseHeight.GetHashCode() ^ UseWeight.GetHashCode() ^ Action.GetHashCode();
-		public static bool operator ==(SubAction left, SubAction right) => left.Equals(right);
-		public static bool operator !=(SubAction left, SubAction right) => !(left == right);
+		None,
+		Age,
+		Height,
+		Weight,
 	}
 
-	public readonly struct ContinuousRange : IEquatable<ContinuousRange>
+	public readonly struct SubActionArguments : IEquatable<SubActionArguments>
 	{
-		public ContinuousRange(decimal minimum, decimal maximum)
+		public SubActionArguments(int? age, ContinuousRangeOrPoint? height, ContinuousRangeOrPoint? weight)
 		{
-			Minimum = minimum;
-			Maximum = maximum;
+			Age = age;
+			Height = height;
+			Weight = weight;
 		}
 
-		public decimal Minimum { get; }
-		public decimal Maximum { get; }
+		public int? Age { get; }
+		public ContinuousRangeOrPoint? Height { get; }
+		public ContinuousRangeOrPoint? Weight { get; }
 
-		public bool Equals([AllowNull] ContinuousRange other) => Minimum == other.Minimum && Maximum == other.Maximum;
-		public override bool Equals(object? obj) => obj is ContinuousRange other && Equals(other);
-		public override int GetHashCode() => Minimum.GetHashCode() ^ Maximum.GetHashCode();
-		public static bool operator ==(ContinuousRange left, ContinuousRange right) => left.Equals(right);
-		public static bool operator !=(ContinuousRange left, ContinuousRange right) => !(left == right);
+		public bool Equals([AllowNull] SubActionArguments other) => Age == other.Age && Height == other.Height && Weight == other.Weight;
+		public override bool Equals(object? obj) => obj is SubActionArguments other && Equals(other);
+		public override int GetHashCode() => HashCode.Combine(Age, Height, Weight);
 
-		public static bool TryParse(string text, out ContinuousRange result)
+		public static bool operator ==(SubActionArguments left, SubActionArguments right) => left.Equals(right);
+		public static bool operator !=(SubActionArguments left, SubActionArguments right) => !(left == right);
+	}
+
+	public readonly struct ContinuousRangeOrPoint : IEquatable<ContinuousRangeOrPoint>
+	{
+		public ContinuousRangeOrPoint(decimal value, int fractionDigit, decimal? range)
+		{
+			Value = value;
+			FractionDigit = fractionDigit;
+			Range = range;
+		}
+
+		public decimal Value { get; }
+		public int FractionDigit { get; }
+		public decimal? Range { get; }
+
+		public bool Equals([AllowNull] ContinuousRangeOrPoint other) => Value == other.Value && Range == other.Range;
+		public override bool Equals(object? obj) => obj is ContinuousRangeOrPoint other && Equals(other);
+		public override int GetHashCode() => HashCode.Combine(Value, Range);
+
+		public static bool operator ==(ContinuousRangeOrPoint left, ContinuousRangeOrPoint right) => left.Equals(right);
+		public static bool operator !=(ContinuousRangeOrPoint left, ContinuousRangeOrPoint right) => !(left == right);
+
+		public static bool TryParse(string text, out ContinuousRangeOrPoint result)
 		{
 			var colonIndex = text.IndexOf(':');
 			var beforeColon = colonIndex < 0 ? text : text[0..colonIndex].Trim();
@@ -227,28 +253,153 @@ namespace GrowthPredictor
 				result = default;
 				return false;
 			}
-			decimal range;
+			var fractionDigit = 0;
+			var decimalPointIndex = beforeColon.IndexOf('.');
+			if (decimalPointIndex >= 0)
+				fractionDigit = beforeColon.Length - decimalPointIndex - 1;
+			decimal? range = null;
 			if (!string.IsNullOrEmpty(afterColon))
 			{
-				if (!decimal.TryParse(afterColon, out range))
+				if (!decimal.TryParse(afterColon, out var rangeValue))
 				{
 					result = default;
 					return false;
 				}
+				range = rangeValue;
 			}
+			result = new ContinuousRangeOrPoint(value, fractionDigit, range);
+			return true;
+		}
+	}
+
+	public enum SubActionArgumentError
+	{
+		None,
+		RequiredParameterMissing,
+		UnnecessaryArgumentFound,
+		PointExpectedButGotRange,
+	}
+
+	public class SubAction
+	{
+		public SubAction(string target, Delegate action)
+		{
+			Target = target;
+			m_Action = action;
+			var parameters = action.Method.GetParameters();
+			for (var i = 0; i < parameters.Length; i++)
+			{
+				if (parameters[i].ParameterType == typeof(Gnuplot))
+				{
+					if (m_GnuplotIndex >= 0)
+						throw new ArgumentException($"Argument must be mapped to single delegate parameter: gnuplot -> {parameters[i].Name}", nameof(action));
+					m_GnuplotIndex = i;
+				}
+				else if (parameters[i].Name == "age" && parameters[i].ParameterType == typeof(int))
+					m_AgeIndex = i;
+				else if (parameters[i].Name == "height" && parameters[i].ParameterType == typeof(ContinuousRange))
+				{
+					m_HeightIndex = i;
+					IsHeightRange = true;
+				}
+				else if (parameters[i].Name == "height" && parameters[i].ParameterType == typeof(decimal))
+				{
+					m_HeightIndex = i;
+					IsHeightRange = false;
+				}
+				else if (parameters[i].Name == "weight" && parameters[i].ParameterType == typeof(ContinuousRange))
+				{
+					m_WeightIndex = i;
+					IsWeightRange = true;
+				}
+				else if (parameters[i].Name == "weight" && parameters[i].ParameterType == typeof(decimal))
+				{
+					m_WeightIndex = i;
+					IsWeightRange = false;
+				}
+				else
+					throw new ArgumentException($"Unmappable delegate parameter: {parameters[i].Name}", nameof(action));
+			}
+		}
+
+		readonly Delegate m_Action;
+		readonly int m_GnuplotIndex = -1;
+		readonly int m_AgeIndex = -1;
+		readonly int m_HeightIndex = -1;
+		readonly int m_WeightIndex = -1;
+
+		public bool UseAge => m_AgeIndex >= 0;
+		public bool UseHeight => m_HeightIndex >= 0;
+		public bool IsHeightRange { get; }
+		public bool UseWeight => m_WeightIndex >= 0;
+		public bool IsWeightRange { get; }
+		public string Target { get; }
+
+		public Dictionary<SubActionArgumentName, SubActionArgumentError> ValidateArguments(SubActionArguments subActionArguments)
+		{
+			var errors = new Dictionary<SubActionArgumentName, SubActionArgumentError>();
+			Span<bool> itemUsages = stackalloc[] { UseAge, UseHeight, UseWeight };
+			Span<bool> actualArgumentUsages = stackalloc[] { subActionArguments.Age.HasValue, subActionArguments.Height.HasValue, subActionArguments.Weight.HasValue };
+			Span<bool> itemIsRanges = stackalloc[] { false, IsHeightRange, IsWeightRange };
+			Span<bool> actualArgumentIsRanges = stackalloc[] { false, subActionArguments.Height.HasValue && subActionArguments.Height.Value.Range.HasValue, subActionArguments.Weight.HasValue && subActionArguments.Weight.Value.Range.HasValue };
+			for (var i = 0; i < actualArgumentUsages.Length; ++i)
+			{
+				if (itemUsages[i] && !actualArgumentUsages[i])
+					errors.Add((SubActionArgumentName)(i + 1), SubActionArgumentError.RequiredParameterMissing);
+				if (!itemUsages[i] && actualArgumentUsages[i])
+					errors.Add((SubActionArgumentName)(i + 1), SubActionArgumentError.UnnecessaryArgumentFound);
+				if (!itemIsRanges[i] && actualArgumentIsRanges[i])
+					errors.TryAdd((SubActionArgumentName)(i + 1), SubActionArgumentError.PointExpectedButGotRange);
+			}
+			return errors;
+		}
+		public void Invoke(Gnuplot gnuplot, SubActionArguments arguments)
+		{
+			var args = new object[Math.Max(Math.Max(Math.Max(m_GnuplotIndex, m_AgeIndex), m_HeightIndex), m_WeightIndex) + 1];
+			if (m_GnuplotIndex >= 0)
+				args[m_GnuplotIndex] = gnuplot;
+			if (m_AgeIndex >= 0)
+				args[m_AgeIndex] = arguments.Age.GetValueOrDefault();
+			if (m_HeightIndex >= 0)
+			{
+				var height = arguments.Height.GetValueOrDefault();
+				args[m_HeightIndex] = IsHeightRange ? new ContinuousRange(height) : height.Value;
+			}
+			if (m_WeightIndex >= 0)
+			{
+				var weight = arguments.Weight.GetValueOrDefault();
+				args[m_WeightIndex] = IsWeightRange ? new ContinuousRange(weight) : weight.Value;
+			}
+			m_Action.DynamicInvoke(args);
+		}
+	}
+
+	public readonly struct ContinuousRange : IEquatable<ContinuousRange>
+	{
+		public ContinuousRange(ContinuousRangeOrPoint rangeOrPoint)
+		{
+			Minimum = rangeOrPoint.Value;
+			decimal range;
+			if (rangeOrPoint.Range is not null)
+				range = rangeOrPoint.Range.Value;
 			else
 			{
 				range = 1;
-				var decimalPointIndex = beforeColon.IndexOf('.');
-				if (decimalPointIndex >= 0)
-				{
-					while (++decimalPointIndex < beforeColon.Length)
-						range /= 10;
-				}
+				for (var i = 0; i < rangeOrPoint.FractionDigit; i++)
+					range /= 10;
 			}
-			result = new ContinuousRange(value, value + range);
-			return true;
+			Maximum = Minimum + range;
 		}
+
+		public decimal Minimum { get; }
+		public decimal Maximum { get; }
+
+		public bool Equals([AllowNull] ContinuousRange other) => Minimum == other.Minimum && Maximum == other.Maximum;
+		public override bool Equals(object? obj) => obj is ContinuousRange other && Equals(other);
+		public override int GetHashCode() => HashCode.Combine(Minimum, Maximum);
+
+		public static bool operator ==(ContinuousRange left, ContinuousRange right) => left.Equals(right);
+		public static bool operator !=(ContinuousRange left, ContinuousRange right) => !(left == right);
 	}
 
 	public class AgeGroupGrowthData
@@ -260,11 +411,10 @@ namespace GrowthPredictor
 		}
 
 		public GrowthDistribution Height { get; }
-
 		public GrowthDistribution Weight { get; }
 	}
 
-	public class GrowthDistribution
+	public readonly struct GrowthDistribution : IEquatable<GrowthDistribution>
 	{
 		public GrowthDistribution(decimal mean, decimal standardDeviation)
 		{
@@ -273,19 +423,24 @@ namespace GrowthPredictor
 		}
 
 		public decimal Mean { get; }
-
 		public decimal StandardDeviation { get; }
 
 		static readonly double Sqrt2 = Math.Sqrt(2);
 
-		public double GetProbability(decimal min, decimal max)
+		public double GetProbability(ContinuousRange range)
 		{
-			var maxV = MathNet.Numerics.SpecialFunctions.Erf((double)(max - Mean) / (double)StandardDeviation / Sqrt2);
-			var minV = MathNet.Numerics.SpecialFunctions.Erf((double)(min - Mean) / (double)StandardDeviation / Sqrt2);
+			var maxV = MathNet.Numerics.SpecialFunctions.Erf((double)(range.Maximum - Mean) / (double)StandardDeviation / Sqrt2);
+			var minV = MathNet.Numerics.SpecialFunctions.Erf((double)(range.Minimum - Mean) / (double)StandardDeviation / Sqrt2);
 			return (maxV - minV) / 2;
 		}
-
 		public double GetCdf(decimal value) => (1 + MathNet.Numerics.SpecialFunctions.Erf((double)(value - Mean) / (double)StandardDeviation / Sqrt2)) / 2;
+
+		public bool Equals([AllowNull] GrowthDistribution other) => Mean == other.Mean && StandardDeviation == other.StandardDeviation;
+		public override bool Equals(object? obj) => obj is GrowthDistribution other && Equals(other);
+		public override int GetHashCode() => HashCode.Combine(Mean, StandardDeviation);
+
+		public static bool operator ==(GrowthDistribution left, GrowthDistribution right) => left.Equals(right);
+		public static bool operator !=(GrowthDistribution left, GrowthDistribution right) => !(left == right);
 	}
 
 	public class Gnuplot : IDisposable
@@ -299,6 +454,8 @@ namespace GrowthPredictor
 			m_Process.Start();
 		}
 
+		Process? m_Process;
+
 		public void Kill()
 		{
 			if (m_Process == null)
@@ -306,13 +463,11 @@ namespace GrowthPredictor
 			if (!m_Process.HasExited)
 				m_Process.Kill();
 		}
-
 		public void Dispose()
 		{
 			Dispose(true);
 			GC.SuppressFinalize(this);
 		}
-
 		protected virtual void Dispose(bool disposing)
 		{
 			if (disposing && m_Process != null)
@@ -323,12 +478,8 @@ namespace GrowthPredictor
 			}
 		}
 
-		Process? m_Process;
-
 		static string GetRangeExpression(double min, double max) => string.Format("[{0}:{1}]", double.IsNaN(min) ? "*" : min.ToString(), double.IsNaN(max) ? "*" : max.ToString());
-
 		public void Plot(string arguments) => Send($"plot {arguments}");
-
 		public void Plot(IEnumerable<string> source, string arguments = "")
 		{
 			Send($"plot '-'{(string.IsNullOrWhiteSpace(arguments) ? "" : " " + arguments)}");
@@ -336,11 +487,8 @@ namespace GrowthPredictor
 				Send(element);
 			Send("e");
 		}
-
 		public void SetXRange(double min, double max) => Send($"set xrange {GetRangeExpression(min, max)}");
-
 		public void SetYRange(double min, double max) => Send($"set yrange {GetRangeExpression(min, max)}");
-
 		public void Send(string message)
 		{
 			if (m_Process == null)
