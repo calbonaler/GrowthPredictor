@@ -1,0 +1,132 @@
+﻿{
+	"5": {
+		"Height": {
+			"Mean": 109.4,
+			"StandardDeviation": 4.66
+		},
+		"Weight": {
+			"Mean": 18.5,
+			"StandardDeviation": 2.48
+		}
+	},
+	"6": {
+		"Height": {
+			"Mean": 115.5,
+			"StandardDeviation": 4.83
+		},
+		"Weight": {
+			"Mean": 20.8,
+			"StandardDeviation": 3.15
+		}
+	},
+	"7": {
+		"Height": {
+			"Mean": 121.5,
+			"StandardDeviation": 5.13
+		},
+		"Weight": {
+			"Mean": 23.4,
+			"StandardDeviation": 3.72
+		}
+	},
+	"8": {
+		"Height": {
+			"Mean": 127.3,
+			"StandardDeviation": 5.50
+		},
+		"Weight": {
+			"Mean": 26.4,
+			"StandardDeviation": 4.71
+		}
+	},
+	"9": {
+		"Height": {
+			"Mean": 133.4,
+			"StandardDeviation": 6.14
+		},
+		"Weight": {
+			"Mean": 29.7,
+			"StandardDeviation": 5.72
+		}
+	},
+	"10": {
+		"Height": {
+			"Mean": 140.1,
+			"StandardDeviation": 6.77
+		},
+		"Weight": {
+			"Mean": 33.9,
+			"StandardDeviation": 6.85
+		}
+	},
+	"11": {
+		"Height": {
+			"Mean": 146.7,
+			"StandardDeviation": 6.63
+		},
+		"Weight": {
+			"Mean": 38.8,
+			"StandardDeviation": 7.66
+		}
+	},
+	"12": {
+		"Height": {
+			"Mean": 151.8,
+			"StandardDeviation": 5.90
+		},
+		"Weight": {
+			"Mean": 43.6,
+			"StandardDeviation": 7.95
+		}
+	},
+	"13": {
+		"Height": {
+			"Mean": 154.9,
+			"StandardDeviation": 5.44
+		},
+		"Weight": {
+			"Mean": 47.3,
+			"StandardDeviation": 7.70
+		}
+	},
+	"14": {
+		"Height": {
+			"Mean": 156.5,
+			"StandardDeviation": 5.30
+		},
+		"Weight": {
+			"Mean": 49.9,
+			"StandardDeviation": 7.41
+		}
+	},
+	"15": {
+		"Height": {
+			"Mean": 157.1,
+			"StandardDeviation": 5.29
+		},
+		"Weight": {
+			"Mean": 51.5,
+			"StandardDeviation": 7.76
+		}
+	},
+	"16": {
+		"Height": {
+			"Mean": 157.6,
+			"StandardDeviation": 5.32
+		},
+		"Weight": {
+			"Mean": 52.6,
+			"StandardDeviation": 7.72
+		}
+	},
+	"17": {
+		"Height": {
+			"Mean": 157.9,
+			"StandardDeviation": 5.38
+		},
+		"Weight": {
+			"Mean": 53.0,
+			"StandardDeviation": 7.83
+		}
+	}
+}

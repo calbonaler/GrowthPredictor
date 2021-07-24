@@ -4,12 +4,47 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading.Tasks;
 
 namespace GrowthPredictor
 {
 	class Program
 	{
-		static void Main()
+		static async Task Main()
+		{
+			var program = new Program();
+			await program.LoadGrowthDataAsync();
+			program.MainLoop();
+		}
+
+		Program()
+		{
+			GrowthData = new Dictionary<int, AgeGroupGrowthData>();
+			SubActions = new[]
+			{
+				new SubAction("height", new Action<Gnuplot, int>((g, age) => PlotGrowthDistribution(g, x => x.Height, age))),
+				new SubAction("weight", new Action<Gnuplot, int>((g, age) => PlotGrowthDistribution(g, x => x.Weight, age))),
+				new SubAction("age"   , new Action<Gnuplot, ContinuousRange>((g, height) => PlotAgeGroupProbabilities(g, x => x.Height, height))),
+				new SubAction("age"   , new Action<Gnuplot, ContinuousRange>((g, weight) => PlotAgeGroupProbabilities(g, x => x.Weight, weight))),
+				new SubAction("lhs"   , new Action<int, decimal>((age, height) => ComputeLhs(age, x => x.Height, height))),
+				new SubAction("lhs"   , new Action<int, decimal>((age, weight) => ComputeLhs(age, x => x.Weight, weight))),
+				new SubAction("help"  , new Action(PrintHelp)),
+			};
+		}
+
+		IReadOnlyDictionary<int, AgeGroupGrowthData> GrowthData;
+		readonly IReadOnlyList<SubAction> SubActions;
+
+		async Task LoadGrowthDataAsync()
+		{
+			using var stream = new FileStream(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GrowthData.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
+			var growthData = await JsonSerializer.DeserializeAsync<Dictionary<int, AgeGroupGrowthData>>(stream);
+			Debug.Assert(growthData is not null);
+			GrowthData = growthData;
+		}
+		void MainLoop()
 		{
 			using var gnuplot = new Gnuplot(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gnuplot", "bin", "gnuplot.exe"));
 			gnuplot.Send("unset key");
@@ -60,17 +95,6 @@ namespace GrowthPredictor
 			}
 		}
 
-		static readonly IReadOnlyList<SubAction> SubActions = new[]
-		{
-			new SubAction("height", new Action<Gnuplot, int>((g, age) => PlotGrowthDistribution(g, x => x.Height, age))),
-			new SubAction("weight", new Action<Gnuplot, int>((g, age) => PlotGrowthDistribution(g, x => x.Weight, age))),
-			new SubAction("age"   , new Action<Gnuplot, ContinuousRange>((g, height) => PlotAgeGroupProbabilities(g, x => x.Height, height))),
-			new SubAction("age"   , new Action<Gnuplot, ContinuousRange>((g, weight) => PlotAgeGroupProbabilities(g, x => x.Weight, weight))),
-			new SubAction("lhs"   , new Action<int, decimal>((age, height) => ComputeLhs(age, x => x.Height, height))),
-			new SubAction("lhs"   , new Action<int, decimal>((age, weight) => ComputeLhs(age, x => x.Weight, weight))),
-			new SubAction("help"  , new Action(PrintHelp)),
-		};
-
 		static bool TryParseCommand(string command, [NotNullWhen(true)] out string? target, out SubActionArguments subActionArguments)
 		{
 			var components = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -119,7 +143,7 @@ namespace GrowthPredictor
 			return true;
 		}
 
-		static void PrintHelp()
+		void PrintHelp()
 		{
 			Console.WriteLine("Commands:");
 			foreach (var subAction in SubActions)
@@ -146,7 +170,7 @@ namespace GrowthPredictor
 			}
 			Console.WriteLine("Type ^Z followed by Enter to exit");
 		}
-		static void PlotGrowthDistribution(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, int age)
+		void PlotGrowthDistribution(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, int age)
 		{
 			if (!GrowthData.TryGetValue(age, out var data))
 			{
@@ -158,7 +182,7 @@ namespace GrowthPredictor
 			gnuplot.SetYRange(0, double.NaN);
 			gnuplot.Plot($"1 / sqrt(2 * pi * {distribution.StandardDeviation} ** 2) * exp(-(x - {distribution.Mean}) ** 2 / (2 * {distribution.StandardDeviation} ** 2))");
 		}
-		static void ComputeLhs(int age, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, decimal value)
+		void ComputeLhs(int age, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, decimal value)
 		{
 			if (!GrowthData.TryGetValue(age, out var data))
 			{
@@ -167,31 +191,12 @@ namespace GrowthPredictor
 			}
 			Console.WriteLine($"{distributionSelector(data).GetCdf(value):E20}");
 		}
-		static void PlotAgeGroupProbabilities(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, ContinuousRange range)
+		void PlotAgeGroupProbabilities(Gnuplot gnuplot, Func<AgeGroupGrowthData, GrowthDistribution> distributionSelector, ContinuousRange range)
 		{
 			gnuplot.SetXRange(5, 17);
 			gnuplot.SetYRange(0, double.NaN);
 			gnuplot.Plot(GrowthData.Select(x => $"{x.Key} {distributionSelector(x.Value).GetProbability(range)}"), "w lp");
 		}
-
-		static readonly IReadOnlyDictionary<int, AgeGroupGrowthData> GrowthData = MakeGrowthData();
-
-		static SortedDictionary<int, AgeGroupGrowthData> MakeGrowthData() => new()
-		{
-			{  5, new AgeGroupGrowthData((109.4m, 4.66m), (18.5m, 2.48m)) },
-			{  6, new AgeGroupGrowthData((115.5m, 4.83m), (20.8m, 3.15m)) },
-			{  7, new AgeGroupGrowthData((121.5m, 5.13m), (23.4m, 3.72m)) },
-			{  8, new AgeGroupGrowthData((127.3m, 5.50m), (26.4m, 4.71m)) },
-			{  9, new AgeGroupGrowthData((133.4m, 6.14m), (29.7m, 5.72m)) },
-			{ 10, new AgeGroupGrowthData((140.1m, 6.77m), (33.9m, 6.85m)) },
-			{ 11, new AgeGroupGrowthData((146.7m, 6.63m), (38.8m, 7.66m)) },
-			{ 12, new AgeGroupGrowthData((151.8m, 5.90m), (43.6m, 7.95m)) },
-			{ 13, new AgeGroupGrowthData((154.9m, 5.44m), (47.3m, 7.70m)) },
-			{ 14, new AgeGroupGrowthData((156.5m, 5.30m), (49.9m, 7.41m)) },
-			{ 15, new AgeGroupGrowthData((157.1m, 5.29m), (51.5m, 7.76m)) },
-			{ 16, new AgeGroupGrowthData((157.6m, 5.32m), (52.6m, 7.72m)) },
-			{ 17, new AgeGroupGrowthData((157.9m, 5.38m), (53.0m, 7.83m)) },
-		};
 	}
 
 	public enum SubActionArgumentName
@@ -236,13 +241,6 @@ namespace GrowthPredictor
 		public int FractionDigit { get; }
 		public decimal? Range { get; }
 
-		public bool Equals([AllowNull] ContinuousRangeOrPoint other) => Value == other.Value && Range == other.Range;
-		public override bool Equals(object? obj) => obj is ContinuousRangeOrPoint other && Equals(other);
-		public override int GetHashCode() => HashCode.Combine(Value, Range);
-
-		public static bool operator ==(ContinuousRangeOrPoint left, ContinuousRangeOrPoint right) => left.Equals(right);
-		public static bool operator !=(ContinuousRangeOrPoint left, ContinuousRangeOrPoint right) => !(left == right);
-
 		public static bool TryParse(string text, out ContinuousRangeOrPoint result)
 		{
 			var colonIndex = text.IndexOf(':');
@@ -270,6 +268,13 @@ namespace GrowthPredictor
 			result = new ContinuousRangeOrPoint(value, fractionDigit, range);
 			return true;
 		}
+
+		public bool Equals([AllowNull] ContinuousRangeOrPoint other) => Value == other.Value && Range == other.Range;
+		public override bool Equals(object? obj) => obj is ContinuousRangeOrPoint other && Equals(other);
+		public override int GetHashCode() => HashCode.Combine(Value, Range);
+
+		public static bool operator ==(ContinuousRangeOrPoint left, ContinuousRangeOrPoint right) => left.Equals(right);
+		public static bool operator !=(ContinuousRangeOrPoint left, ContinuousRangeOrPoint right) => !(left == right);
 	}
 
 	public enum SubActionArgumentError
@@ -397,25 +402,36 @@ namespace GrowthPredictor
 		public bool Equals([AllowNull] ContinuousRange other) => Minimum == other.Minimum && Maximum == other.Maximum;
 		public override bool Equals(object? obj) => obj is ContinuousRange other && Equals(other);
 		public override int GetHashCode() => HashCode.Combine(Minimum, Maximum);
+		public override string ToString() => $"[{Minimum}, {Maximum})";
 
 		public static bool operator ==(ContinuousRange left, ContinuousRange right) => left.Equals(right);
 		public static bool operator !=(ContinuousRange left, ContinuousRange right) => !(left == right);
 	}
 
-	public class AgeGroupGrowthData
+	public readonly struct AgeGroupGrowthData : IEquatable<AgeGroupGrowthData>
 	{
-		public AgeGroupGrowthData((decimal mean, decimal standardDeviation) height, (decimal mean, decimal standardDeviation) weight)
+		[JsonConstructor]
+		public AgeGroupGrowthData(GrowthDistribution height, GrowthDistribution weight)
 		{
-			Height = new GrowthDistribution(height.mean, height.standardDeviation);
-			Weight = new GrowthDistribution(weight.mean, weight.standardDeviation);
+			Height = height;
+			Weight = weight;
 		}
 
 		public GrowthDistribution Height { get; }
 		public GrowthDistribution Weight { get; }
+
+		public bool Equals([AllowNull] AgeGroupGrowthData other) => Height == other.Height && Weight == other.Weight;
+		public override bool Equals(object? obj) => obj is AgeGroupGrowthData other && Equals(other);
+		public override int GetHashCode() => HashCode.Combine(Height, Weight);
+		public override string ToString() => $"Height: {{{Height}}}, Weight: {{{Weight}}}";
+
+		public static bool operator ==(AgeGroupGrowthData left, AgeGroupGrowthData right) => left.Equals(right);
+		public static bool operator !=(AgeGroupGrowthData left, AgeGroupGrowthData right) => !(left == right);
 	}
 
 	public readonly struct GrowthDistribution : IEquatable<GrowthDistribution>
 	{
+		[JsonConstructor]
 		public GrowthDistribution(decimal mean, decimal standardDeviation)
 		{
 			Mean = mean;
@@ -438,6 +454,7 @@ namespace GrowthPredictor
 		public bool Equals([AllowNull] GrowthDistribution other) => Mean == other.Mean && StandardDeviation == other.StandardDeviation;
 		public override bool Equals(object? obj) => obj is GrowthDistribution other && Equals(other);
 		public override int GetHashCode() => HashCode.Combine(Mean, StandardDeviation);
+		public override string ToString() => $"Mean: {Mean}, StandardDeviation: {StandardDeviation}";
 
 		public static bool operator ==(GrowthDistribution left, GrowthDistribution right) => left.Equals(right);
 		public static bool operator !=(GrowthDistribution left, GrowthDistribution right) => !(left == right);
