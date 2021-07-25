@@ -1,0 +1,42 @@
+body {
+	margin: 10px;
+}
+h1 {
+	font-size: 25px;
+}
+#inputs {
+	display: table;
+	width: 100%;
+}
+#inputs > div {
+	display: table-row;
+}
+#inputs label, #inputs input {
+	display: table-cell;
+}
+#inputs label {
+	font-weight: normal;
+	text-align: unset;
+	width: 105px;
+}
+#inputs-heightRange > label, #inputs-weightRange > label {
+	padding-left: 10px;
+}
+#inputs input, #inputs select {
+	width: 100%;
+	max-width: 200px;
+}
+select {
+	padding: 2px 6px 2px 0px;
+	box-sizing: unset;
+	border-style: inset;
+}
+#refresh-button {
+	margin: 10px 0;
+}
+#chart-container {
+	margin: 20px 0 0 0;
+	position: relative;
+	width: 100%;
+	height: calc(100vh - 300px);
+}

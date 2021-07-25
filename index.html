@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Growth Predictor</title>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width,initial-scale=1">
+		<link rel="stylesheet" href="main.css"/>
+		<script src="data.js"></script>
+		<script src="main.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/mathjs@9.4.4/lib/browser/math.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/chart.js@3.4.1/dist/chart.min.js"></script>
+	</head>
+	<body>
+		<h1>Growth Predictor</h1>
+		<div id="inputs">
+			<div id="inputs-graphScale">
+				<label>Graph/Scale:</label>
+				<select>
+					<option value="height">Height</option>
+					<option value="weight">Weight</option>
+					<option value="age">Age</option>
+					<option value="gis">GIS</option>
+				</select>
+			</div>
+			<div id="inputs-age"        ><label>Age:        </label><input type="number" min="5" max="17"/></div>
+			<div id="inputs-height"     ><label>Height (cm):</label><input type="number" min="0" step="any"/></div>
+			<div id="inputs-heightRange"><label>Range:      </label><input type="number" min="0" step="any"/></div>
+			<div id="inputs-weight"     ><label>Weight (kg):</label><input type="number" min="0" step="any"/></div>
+			<div id="inputs-weightRange"><label>Range:      </label><input type="number" min="0" step="any"/></div>
+		</div>
+		<button id="refresh-button">Refresh</button>
+		<div id="chart-container"></div>
+	</body>
+</html>
