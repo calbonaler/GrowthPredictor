@@ -52,7 +52,7 @@ window.addEventListener("DOMContentLoaded", function() {
 		}
 		const container = document.getElementById("chart-container");
 		container.innerHTML = "";
-		container.textContent = text;
+		container.innerText = text;
 	}
 	function plotGrowthDistribution(name, xTitle, age) {
 		const dist = gGrowthData[age][name];
@@ -95,8 +95,9 @@ window.addEventListener("DOMContentLoaded", function() {
 		const {name, value} = height != null ? {name: "height", value: height} :
 		                                       {name: "weight", value: weight};
 		const dist = gGrowthData[age][name];
-		const prob = (1 + math.erf((value - dist.mean) / dist.sd / Math.sqrt(2))) / 2;
-		displayText(prob.toExponential(20));
+		const sigmaScale = (value - dist.mean) / dist.sd;
+		const prob = (1 + math.erf(sigmaScale / Math.sqrt(2))) / 2;
+		displayText(prob.toExponential(20) + "\n" + sigmaScale + "σ");
 	}
 
 	const gActions = {
