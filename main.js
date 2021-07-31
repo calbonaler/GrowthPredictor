@@ -101,10 +101,10 @@ window.addEventListener("DOMContentLoaded", function() {
 	}
 
 	const gActions = {
-		"height": {callback: plotHeightDistribution,    usingInputs: ["age"],                                            requiredInputs: ["age"]},
-		"weight": {callback: plotWeightDistribution,    usingInputs: ["age"],                                            requiredInputs: ["age"]},
-		"age"   : {callback: plotAgeGroupProbabilities, usingInputs: ["height", "heightRange", "weight", "weightRange"], requiredInputs: []     },
-		"gis"   : {callback: computeGis,                usingInputs: ["age", "height", "weight"],                        requiredInputs: ["age"]},
+		"height": {callback: plotHeightDistribution,    usingInputs: ["age"],                                          },
+		"weight": {callback: plotWeightDistribution,    usingInputs: ["age"],                                          },
+		"age"   : {callback: plotAgeGroupProbabilities, usingInputs: ["height", "heightRange", "weight", "weightRange"]},
+		"gis"   : {callback: computeGis,                usingInputs: ["age", "height", "weight"],                      },
 	};
 
 	// assign IDs for each input element
@@ -153,7 +153,7 @@ window.addEventListener("DOMContentLoaded", function() {
 	}
 	const refreshButton = document.getElementById("refresh-button");
 	refreshButton.addEventListener("click", function() {
-		const {callback, requiredInputs} = gActions[graphScaleInput.value];
+		const {callback, usingInputs} = gActions[graphScaleInput.value];
 		const args = {};
 		for (const input of document.getElementById("inputs").children) {
 			const key = input.id.slice("inputs-".length);
@@ -165,9 +165,14 @@ window.addEventListener("DOMContentLoaded", function() {
 		parseValueAndRange("height", args);
 		// weight, weightRange
 		parseValueAndRange("weight", args);
-		for (const key of requiredInputs) {
-			if (args[key] == null) {
-				alert(`Required parameter "${key}" is not specified.`);
+		// requiredness & range check
+		if (usingInputs.indexOf("age") >= 0) {
+			if (args.age == null) {
+				alert('Required parameter "age" is not specified.');
+				return;
+			}
+			if (args.age < 0 || args.age > 17) {
+				alert('Parameter "age" is out of range (0-17)');
 				return;
 			}
 		}
